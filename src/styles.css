@@ -212,6 +212,9 @@ html, body {
 
 /* drawing pad ----------------------------------------------------------- */
 
+/* A bare [hidden] loses to the class below, so spell it out. */
+.pad[hidden] { display: none; }
+
 .pad {
   left: 50%;
   top: 50%;

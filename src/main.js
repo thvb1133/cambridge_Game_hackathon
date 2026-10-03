@@ -170,13 +170,15 @@ $('pad-form').addEventListener('submit', (event) => {
     result: outcome.ok ? outcome.effect : null,
     error: outcome.ok ? null : outcome.reason,
   });
-  if (outcome.ok) companionSays(`that is a ${describeSketch(spec)}. i will remember it.`);
+  if (outcome.ok) {
+    companionSays(`that is a ${describeSketch(spec)}. i will remember it.`, { hold: 4000 });
+  }
 });
 
 function forgetMe() {
   memory.forget();
   renderMemory();
-  companionSays('forgotten. we start over next time.');
+  companionSays('forgotten. we start over next time.', { hold: 4000 });
 }
 
 // --- the language path ---------------------------------------------------
@@ -257,7 +259,7 @@ function handleEvent(event) {
       renderMemory();
       break;
     case 'structures-fell':
-      companionSays(`your ${describeSketch(event.structures[0].spec)} came down`);
+      companionSays(`your ${describeSketch(event.structures[0].spec)} came down`, { hold: 2500 });
       break;
     case 'defeat':
       toast('down');
@@ -271,7 +273,15 @@ function handleEvent(event) {
   }
 }
 
-function companionSays(line) {
+// The agent chatters every 1.4s, so anything the player should actually read
+// — the greeting, what it just built — gets a few seconds of the panel to
+// itself before tactical lines are allowed back in.
+let companionHeldUntil = 0;
+
+function companionSays(line, { hold = 0 } = {}) {
+  const now = performance.now();
+  if (!hold && now < companionHeldUntil) return;
+  companionHeldUntil = now + hold;
   $('companion-line').textContent = line;
   if (voice.listening || match.autopilot) speak(line);
 }
@@ -475,5 +485,5 @@ appendLog({
   origin: 'boot',
   result: `attuned · ${modelEnabled ? 'model compiler armed' : 'offline compiler'}`,
 });
-companionSays(memory.greeting());
+companionSays(memory.greeting(), { hold: 7000 });
 requestAnimationFrame(frame);
