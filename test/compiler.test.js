@@ -25,6 +25,28 @@ test('compiles the demo script', () => {
   assert.equal(py('take over for me'), 'cast.autopilot(enabled=True)');
 });
 
+test('building and remembering are reachable from plain speech', () => {
+  assert.equal(py('build the mountain i drew'), 'cast.conjure(sketch="mountain", span=3)');
+  assert.equal(py('put up what i drew'), 'cast.conjure(sketch="last", span=3)');
+  assert.equal(py('raise the house'), 'cast.conjure(sketch="house", span=3)');
+  assert.equal(py('knock it down'), 'cast.raze()');
+  assert.equal(py('what do you remember about me'), 'cast.recall(about="you")');
+  assert.equal(py('show me the sketchbook'), 'cast.recall(about="sketches")');
+});
+
+test('"raise a wall" is still a wall, not a building', () => {
+  assert.equal(
+    py('raise a wall of earth between me and the strongest one'),
+    'cast.wall(element=EARTH, target="strongest", span=6)',
+  );
+  assert.equal(py('build a barrier'), 'cast.wall(element=ATTUNED, target="nearest", span=6)');
+});
+
+test('a sketch nickname survives the trip through the compiler', () => {
+  assert.equal(py('build "red keep"'), 'cast.conjure(sketch="red keep", span=3)');
+  assert.equal(py('conjure the one called jade pagoda'), 'cast.conjure(sketch="jade pagoda", span=3)');
+});
+
 test('direction words flip a scale shift', () => {
   assert.equal(py('zoom out'), 'cast.ascend(steps=1)');
   assert.equal(py('zoom in'), 'cast.ascend(steps=-1)');

@@ -6,7 +6,8 @@
 // for phrasings this misses, but routes its answer through the same validator.
 
 import { ELEMENTS } from './elements.js';
-import { FORMS, ORDERS, TARGETS, SpellError, validateCall } from './spellbook.js';
+import { ARCHETYPE_NAMES } from './sketch.js';
+import { FORMS, ORDERS, RECOLLECTIONS, TARGETS, SpellError, validateCall } from './spellbook.js';
 
 const VERBS = {
   bolt: ['bolt', 'shoot', 'blast', 'strike', 'hit', 'attack', 'throw', 'fling', 'zap', 'burn', 'launch'],
@@ -18,6 +19,18 @@ const VERBS = {
   order: ['order', 'tell', 'command', 'make my companion'],
   ascend: ['ascend', 'zoom', 'descend', 'scale', 'shrink', 'grow', 'dive', 'pull out', 'go up', 'go down'],
   autopilot: ['autopilot', 'auto mode', 'auto-mode', 'auto', 'take over', 'play for me', 'afk'],
+  conjure: ['conjure', 'build', 'raise', 'erect', 'place', 'put up', 'what i drew'],
+  raze: [
+    'raze',
+    'demolish',
+    'knock down',
+    'knock it down',
+    'tear down',
+    'tear it down',
+    'pull down',
+    'pull it down',
+  ],
+  recall: ['recall', 'remember', 'what do you know', 'who am i', 'last time', 'sketchbook'],
 };
 
 const ELEMENT_WORDS = {
@@ -79,6 +92,15 @@ function hasWord(source, word) {
 
 const COMPANION_RE = /\b(companion|dragon|robot|alien|pet|partner)\b/;
 const TELLING_RE = /\b(tell|order|command|make)\b/;
+const BARRIER_RE = /\b(wall|barrier|barricade|fence)\b/;
+const DRAWING_RE = new RegExp(`\\b(drew|drawn|drawing|sketch|${ARCHETYPE_NAMES.join('|')})\\b`);
+
+const RECOLLECTION_WORDS = {
+  sketches: ['sketch', 'sketches', 'sketchbook', 'drawing', 'drawings', 'drew', 'built'],
+  scales: ['scale', 'scales', 'ladder', 'rung', 'rungs', 'where'],
+  companion: ['companion', 'dragon', 'robot', 'alien', 'pet', 'yourself'],
+  you: ['me', 'myself', 'i', 'about me', 'who am i'],
+};
 
 function pickSpell(source) {
   let best = null;
@@ -100,6 +122,10 @@ function pickSpell(source) {
     if (findOrder(source)) return 'order';
   }
   if (best === 'ward' && COMPANION_RE.test(source)) return 'order';
+  // "raise" is ambiguous between a barrier and a drawing, so let the noun
+  // decide: a wall is a wall, but the mountain you drew is a structure.
+  if (best === 'conjure' && BARRIER_RE.test(source)) return 'wall';
+  if (best === 'wall' && DRAWING_RE.test(source) && !BARRIER_RE.test(source)) return 'conjure';
   return best;
 }
 
@@ -123,6 +149,10 @@ function extractArgs(spellName, source) {
       return { steps: findSteps(source) };
     case 'autopilot':
       return { enabled: !/\b(off|stop|disable|back|mine)\b/.test(source) };
+    case 'conjure':
+      return { sketch: findSketchName(source), span: findNumber(source) };
+    case 'recall':
+      return { about: findRecollection(source) };
     default:
       return {};
   }
@@ -153,6 +183,30 @@ function findTarget(source) {
 
 function findOrder(source) {
   return ORDERS.find((order) => hasWord(source, order));
+}
+
+// A quoted nickname beats an archetype word, so "build 'red keep'" finds the
+// sketch you named rather than the last tower you happened to draw.
+function findSketchName(source) {
+  const quoted = source.match(/["'“”‘’]([^"'“”‘’]{1,24})["'“”‘’]/);
+  if (quoted) return quoted[1];
+  const named = source.match(/\bcalled ([a-z0-9][a-z0-9 '-]{0,23})$/);
+  if (named) return named[1];
+  return findWord(source, ARCHETYPE_NAMES) ?? 'last';
+}
+
+function findRecollection(source) {
+  let best;
+  let bestLength = 0;
+  for (const about of RECOLLECTIONS) {
+    for (const word of RECOLLECTION_WORDS[about] ?? []) {
+      if (hasWord(source, word) && word.length > bestLength) {
+        bestLength = word.length;
+        best = about;
+      }
+    }
+  }
+  return best;
 }
 
 function findWord(source, words) {

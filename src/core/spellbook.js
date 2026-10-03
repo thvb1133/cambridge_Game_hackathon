@@ -10,6 +10,12 @@ import { ELEMENTS } from './elements.js';
 export const TARGETS = ['nearest', 'strongest', 'weakest', 'self', 'ally', 'all'];
 export const FORMS = ['dragon', 'robot', 'alien'];
 export const ORDERS = ['protect', 'attack', 'follow', 'hold', 'scout'];
+export const RECOLLECTIONS = ['you', 'sketches', 'scales', 'companion'];
+
+// The one free-text parameter in the game: the nickname of a drawing. Kept to
+// a deliberately dull character class so a sketch name can never carry markup
+// into the log or anything interesting into the model prompt.
+const NAME_PATTERN = /^[a-z0-9][a-z0-9 '-]{0,23}$/;
 
 const element = (fallback = 'attuned') => ({
   type: 'enum',
@@ -87,6 +93,26 @@ export const SPELLBOOK = {
       enabled: { type: 'boolean', default: true },
     },
   },
+  conjure: {
+    qi: 26,
+    summary: 'Raise something you drew into the arena as solid cover.',
+    params: {
+      sketch: { type: 'text', default: 'last' },
+      span: { type: 'number', min: 1, max: 6, default: 3 },
+    },
+  },
+  raze: {
+    qi: 8,
+    summary: 'Pull down the nearest structure you raised.',
+    params: {},
+  },
+  recall: {
+    qi: 0,
+    summary: 'Ask your companion what it remembers about you.',
+    params: {
+      about: { type: 'enum', values: RECOLLECTIONS, default: 'you' },
+    },
+  },
 };
 
 export const SPELL_NAMES = Object.keys(SPELLBOOK);
@@ -130,6 +156,13 @@ function coerce(spellName, key, schema, value) {
     const n = Number(value);
     if (!Number.isFinite(n)) throw new SpellError(`${spellName}(${key}=…) must be a number`);
     return Math.min(schema.max, Math.max(schema.min, n));
+  }
+  if (schema.type === 'text') {
+    const normalised = String(value).toLowerCase().trim().replace(/\s+/g, ' ');
+    if (!NAME_PATTERN.test(normalised)) {
+      throw new SpellError(`${spellName}(${key}=…) must be a short plain name`);
+    }
+    return normalised;
   }
   if (schema.type === 'boolean') {
     if (typeof value === 'boolean') return value;
