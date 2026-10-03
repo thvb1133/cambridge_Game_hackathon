@@ -2,8 +2,11 @@
 // unit-tested in node and driven identically by the keyboard, the compiler,
 // the gesture recogniser and the autopilot agent.
 
+import { COMPOUNDS } from './compounds.js';
+import { companionReply } from './dialogue.js';
 import { ELEMENTS, damageMultiplier, generates } from './elements.js';
-import { SCALES, clampScaleIndex } from './scales.js';
+import { rosterById } from './roster.js';
+import { SCALES, clampScaleIndex, scaleIndexById } from './scales.js';
 import { describeSketch, footprintRadius, structureHeight } from './sketch.js';
 import { renderPython, validateCall } from './spellbook.js';
 
@@ -26,6 +29,11 @@ function makeUnit(partial) {
     velocity: { x: 0, z: 0 },
     cooldown: 0,
     alive: true,
+    hidden: false,
+    revealed: false,
+    role: null,
+    rosterId: null,
+    title: null,
     ...partial,
   };
 }
@@ -35,7 +43,13 @@ export class Match {
     this.onEvent = onEvent;
     this.memory = memory;
     this.time = 0;
-    this.scaleIndex = 2; // start at the cell; it reads well on a projector
+    this.scaleIndex = scaleIndexById('cell'); // reads well on a projector
+    this.aim = null;
+    this.aimAt = 0;
+    this.rosterId = 'rm';
+    this.signals = [];
+    this.priorityId = null;
+    this.priorityUntil = 0;
     this.autopilot = false;
     this.qi = MAX_QI;
     this.log = [];
@@ -50,13 +64,21 @@ export class Match {
 
   reset() {
     this.units = [];
+    this.signals = [];
+    this.priorityId = null;
+    this.priorityUntil = 0;
+    const picked = rosterById(this.rosterId);
     this.hero = makeUnit({
       faction: 'player',
       name: 'hero',
-      element: 'fire',
+      title: picked.title,
+      rosterId: picked.id,
+      role: picked.role,
+      element: picked.element,
       hp: 160,
       maxHp: 160,
       position: { x: 0, z: 4 },
+      swing: 0,
     });
     this.companion = makeUnit({
       faction: 'player',
@@ -67,6 +89,7 @@ export class Match {
       maxHp: 90,
       position: { x: 1.8, z: 5.2 },
       order: 'protect',
+      dna: picked.element,
     });
     this.units.push(this.hero, this.companion);
     this.spawnWave();
@@ -86,6 +109,35 @@ export class Match {
         }),
       );
     }
+    this.spawnRival();
+  }
+
+  // The other fighter in the war, plus their pocket beast. Both can cloak
+  // and leave a signal; until that signal is read they cannot be hit.
+  spawnRival() {
+    this.rival = makeUnit({
+      faction: 'enemy',
+      name: 'rival',
+      title: 'Rival',
+      role: 'ancient',
+      element: 'metal',
+      hp: 120,
+      maxHp: 120,
+      position: { x: -6, z: -5 },
+      hideAt: this.time + 7,
+    });
+    this.familiar = makeUnit({
+      faction: 'enemy',
+      name: 'familiar',
+      title: 'Familiar',
+      role: 'beast',
+      element: 'wood',
+      hp: 70,
+      maxHp: 70,
+      position: { x: -4.4, z: -3.6 },
+      hideAt: this.time + 9,
+    });
+    this.units.push(this.rival, this.familiar);
   }
 
   get scale() {
@@ -146,6 +198,7 @@ export class Match {
         const target = this.resolveTarget(args.target);
         if (!target) return 'nothing in range';
         const focused = Boolean(this.auraAt(this.hero.position, 'range'));
+        this.hero.swing = 0.32;
         this.projectiles.push({
           element: resolveElement(args.element),
           from: { ...this.hero.position },
@@ -207,8 +260,60 @@ export class Match {
         return `companion will ${args.order}`;
       }
       case 'ascend': {
+        if (args.to && args.to !== 'next') {
+          const index = scaleIndexById(args.to);
+          if (index === null) return 'no such rung';
+          return this.shiftScale(index - this.scaleIndex);
+        }
         return this.shiftScale(args.steps);
       }
+      case 'fuse': {
+        const compound = COMPOUNDS[args.compound];
+        const target = this.resolveTarget(args.target);
+        if (!target) return 'nothing in range';
+        const focused = Boolean(this.auraAt(this.hero.position, 'range'));
+        this.hero.swing = 0.32;
+        this.projectiles.push({
+          element: compound.strike,
+          compound: args.compound,
+          from: { ...this.hero.position },
+          to: target.id,
+          position: { ...this.hero.position },
+          speed: 18,
+          damage: focused ? 48 : 36,
+        });
+        return `${args.compound} at ${target.name}`;
+      }
+      case 'talk': {
+        const reply = companionReply(args.line, {
+          form: this.companion.form,
+          order: this.companion.order,
+          scale: this.scale.title,
+          affinity: this.memory?.summary().affinity ?? 0,
+        });
+        this.memory?.remember(`said: ${args.line}`);
+        this.memory?.noteChat(args.line, reply);
+        this.onEvent({ type: 'talk', line: args.line, reply });
+        return reply;
+      }
+      case 'embody': {
+        const picked = rosterById(args.hero);
+        this.rosterId = picked.id;
+        this.hero.rosterId = picked.id;
+        this.hero.role = picked.role;
+        this.hero.element = picked.element;
+        this.hero.title = picked.title;
+        this.companion.dna = picked.element;
+        this.memory?.noteCast('embody', { element: picked.element });
+        this.onEvent({ type: 'embody', hero: picked });
+        return `became ${picked.title}`;
+      }
+      case 'hide': {
+        const unit = args.who === 'ally' ? this.companion : this.hero;
+        return this.hideUnit(unit);
+      }
+      case 'recognize':
+        return this.recognize(args.target);
       case 'autopilot': {
         this.autopilot = args.enabled;
         this.onEvent({ type: 'autopilot', enabled: args.enabled });
@@ -346,20 +451,93 @@ export class Match {
     return `${from.title} → ${this.scale.title}`;
   }
 
+  hideUnit(unit) {
+    if (!unit?.alive) return 'nobody there to hide';
+    if (unit.hidden && !unit.revealed) return `${unit.title || unit.name} is already hidden`;
+    unit.hidden = true;
+    unit.revealed = false;
+    this.signals = this.signals.filter((signal) => signal.ownerId !== unit.id);
+    const signal = {
+      id: `sig${nextId++}`,
+      ownerId: unit.id,
+      position: { x: unit.position.x, z: unit.position.z },
+      element: unit.element,
+      recognized: false,
+      watch: 0,
+      look: 0,
+    };
+    this.signals.push(signal);
+    this.onEvent({ type: 'hide', unit, signal });
+    return `${unit.title || unit.name} left a signal`;
+  }
+
+  recognize(selector = 'gaze') {
+    const origin = selector === 'gaze' && this.aim ? this.aim : this.hero.position;
+    const pool = this.signals.filter(
+      (signal) => !signal.recognized && this.factionOf(signal.ownerId) === 'enemy',
+    );
+    const signal = maxBy(pool, (item) => -distance(origin, item.position));
+    if (!signal) return 'no signal to read';
+    return this.reveal(signal, 'player');
+  }
+
+  reveal(signal, byFaction = null) {
+    const owner = this.units.find((unit) => unit.id === signal.ownerId);
+    if (!owner?.alive) return 'the signal leads nowhere';
+    if (byFaction && owner.faction === byFaction) return 'that signal is yours';
+    signal.recognized = true;
+    owner.hidden = false;
+    owner.revealed = true;
+    owner.hideAt = this.time + 12;
+    this.priorityId = owner.id;
+    this.priorityUntil = this.time + 4;
+    this.onEvent({ type: 'recognize', signal, unit: owner });
+    return `${owner.title || owner.name} recognized`;
+  }
+
+  factionOf(id) {
+    return this.units.find((unit) => unit.id === id)?.faction ?? null;
+  }
+
+  // Where the eyes or the palm are pointing. Expires quickly so a stale look
+  // does not keep stealing bolts after the player looks away.
+  setAim(point) {
+    this.aim = point ? { x: point.x, z: point.z } : null;
+    this.aimAt = this.time;
+  }
+
+  visibleEnemies() {
+    return this.enemies.filter((enemy) => !enemy.hidden || enemy.revealed);
+  }
+
   resolveTarget(selector) {
+    const visible = this.visibleEnemies();
+    if (
+      (selector === 'nearest' || selector === 'gaze' || selector === 'all') &&
+      this.priorityId &&
+      this.time <= this.priorityUntil
+    ) {
+      const marked = visible.find((enemy) => enemy.id === this.priorityId);
+      if (marked) return marked;
+    }
+    if ((selector === 'nearest' || selector === 'gaze') && this.aim) {
+      const aimed = visible.find((enemy) => distance(enemy.position, this.aim) < 3.2);
+      if (aimed) return aimed;
+    }
     switch (selector) {
       case 'self':
         return this.hero;
       case 'ally':
         return this.companion.alive ? this.companion : this.hero;
       case 'strongest':
-        return maxBy(this.enemies, (e) => e.hp);
+        return maxBy(visible, (e) => e.hp);
       case 'weakest':
-        return maxBy(this.enemies, (e) => -e.hp);
+        return maxBy(visible, (e) => -e.hp);
       case 'all':
+      case 'gaze':
       case 'nearest':
       default:
-        return maxBy(this.enemies, (e) => -distance(this.hero.position, e.position));
+        return maxBy(visible, (e) => -distance(this.hero.position, e.position));
     }
   }
 
@@ -371,7 +549,10 @@ export class Match {
     if (this.nearGeneratingAlly()) regen *= 1.6;
     if (this.auraAt(this.hero.position, 'rest')) regen *= 1.5;
     this.qi = Math.min(MAX_QI, this.qi + regen * dt);
+    if (this.hero.swing > 0) this.hero.swing = Math.max(0, this.hero.swing - dt);
+    if (this.aim && this.time - this.aimAt > 0.45) this.aim = null;
 
+    this.stepSignals(dt);
     this.stepProjectiles(dt);
     this.stepWalls(dt);
     this.stepStructures();
@@ -428,9 +609,56 @@ export class Match {
     this.onEvent({ type: 'structures-fell', structures: fallen });
   }
 
+  stepSignals(dt) {
+    this.autoHide();
+    if (!this.aim) return;
+    for (const signal of this.signals) {
+      if (signal.recognized || this.factionOf(signal.ownerId) !== 'enemy') continue;
+      if (distance(this.aim, signal.position) > 2.2) {
+        signal.look = 0;
+        continue;
+      }
+      signal.look += dt;
+      if (signal.look > 0.35) this.reveal(signal, 'player');
+    }
+  }
+
+  autoHide() {
+    for (const unit of [this.rival, this.familiar]) {
+      if (!unit?.alive || (unit.hidden && !unit.revealed)) continue;
+      if (this.time < (unit.hideAt ?? 0)) continue;
+      this.hideUnit(unit);
+    }
+  }
+
+  huntSignal(enemy, signal, dt) {
+    const dx = signal.position.x - enemy.position.x;
+    const dz = signal.position.z - enemy.position.z;
+    const d = Math.hypot(dx, dz) || 1;
+    if (d > 1.35) {
+      enemy.position.x += (dx / d) * 2.4 * dt;
+      enemy.position.z += (dz / d) * 2.4 * dt;
+      signal.watch = 0;
+    } else {
+      signal.watch = (signal.watch || 0) + dt;
+      if (signal.watch > 1.25) this.reveal(signal, 'enemy');
+    }
+    clampToArena(enemy.position);
+  }
+
   stepEnemies(dt) {
     for (const enemy of this.enemies) {
+      if (enemy.hidden && !enemy.revealed) continue;
+      const cloaked = [this.hero, this.companion].find((unit) => unit?.alive && unit.hidden && !unit.revealed);
+      if (cloaked) {
+        const signal = this.signals.find((item) => item.ownerId === cloaked.id && !item.recognized);
+        if (signal) {
+          this.huntSignal(enemy, signal, dt);
+          continue;
+        }
+      }
       const target = this.companion.alive && Math.random() < 0.002 ? this.companion : this.hero;
+      if (target.hidden && !target.revealed) continue;
       const dx = target.position.x - enemy.position.x;
       const dz = target.position.z - enemy.position.z;
       const d = Math.hypot(dx, dz) || 1;
@@ -465,6 +693,10 @@ export class Match {
   }
 
   damage(unit, amount, element) {
+    if (unit.hidden && !unit.revealed) {
+      this.onEvent({ type: 'miss', unit });
+      return;
+    }
     const multiplier = damageMultiplier(element, unit.element);
     let dealt = amount * multiplier;
     if (unit.shield > 0) {
@@ -477,6 +709,7 @@ export class Match {
     if (unit.hp <= 0) {
       unit.hp = 0;
       unit.alive = false;
+      this.signals = this.signals.filter((signal) => signal.ownerId !== unit.id);
       this.onEvent({ type: 'down', unit });
       if (unit === this.hero) {
         this.memory?.noteOutcome('defeats');

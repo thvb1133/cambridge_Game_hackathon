@@ -6,6 +6,16 @@
 // Extended fingers → element. Pinch → release the spell.
 
 import { ELEMENTS } from '../core/elements.js';
+import { acquireCamera, releaseCamera } from './camera.js';
+
+// Closed fist raises earth. One to five extended fingers attune, in wuxing
+// order, and a pinch releases the bolt. Counted fingers survive bad light
+// better than a drawn sigil.
+export function gestureFromCount(extended) {
+  if (extended <= 0) return { action: 'wall', element: 'earth' };
+  if (extended > 5) return null;
+  return { action: 'bind', element: ELEMENTS[extended - 1] };
+}
 
 const MODEL_URL =
   'https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task';
@@ -15,30 +25,32 @@ const FINGER_TIPS = [8, 12, 16, 20];
 const FINGER_PIPS = [6, 10, 14, 18];
 
 export class HandInput {
-  constructor({ onElement = () => {}, onCast = () => {}, onStatus = () => {} } = {}) {
+  constructor({ onElement = () => {}, onCast = () => {}, onWall = () => {}, onStatus = () => {} } = {}) {
     this.onElement = onElement;
     this.onCast = onCast;
+    this.onWall = onWall;
     this.onStatus = onStatus;
     this.enabled = false;
     this.landmarker = null;
     this.video = null;
     this.lastElement = null;
     this.pinchWasClosed = false;
+    this.fistHeld = false;
     this.lastCastAt = 0;
   }
 
   async start() {
     this.onStatus('requesting camera…');
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({
-        video: { width: 640, height: 480, facingMode: 'user' },
-      });
+      const stream = await acquireCamera();
       this.video = document.createElement('video');
       this.video.srcObject = stream;
       this.video.playsInline = true;
       this.video.muted = true;
       await this.video.play();
     } catch (error) {
+      if (this.video) await releaseCamera(this.video);
+      this.video = null;
       this.onStatus('camera denied — keyboard and voice still work');
       return false;
     }
@@ -53,19 +65,22 @@ export class HandInput {
         runningMode: 'VIDEO',
       });
     } catch (error) {
+      await releaseCamera(this.video);
+      this.video = null;
       this.onStatus('hand model unavailable offline — keyboard and voice still work');
       return false;
     }
 
     this.enabled = true;
-    this.onStatus('hands live · 1-5 fingers picks an element, pinch to cast');
+    this.onStatus('hands live · fist raises earth, 1–5 fingers attune, pinch casts');
     return true;
   }
 
   stop() {
     this.enabled = false;
-    const tracks = this.video?.srcObject?.getTracks?.() ?? [];
-    for (const track of tracks) track.stop();
+    const video = this.video;
+    this.video = null;
+    releaseCamera(video);
   }
 
   poll(nowMs) {
@@ -73,22 +88,28 @@ export class HandInput {
 
     const result = this.landmarker.detectForVideo(this.video, nowMs);
     const hand = result.landmarks?.[0];
-    if (!hand) return null;
-
-    const extended = countExtended(hand);
-    if (extended >= 1 && extended <= 5) {
-      const element = ELEMENTS[extended - 1];
-      if (element !== this.lastElement) {
-        this.lastElement = element;
-        this.onElement(element);
-      }
+    if (!hand) {
+      this.fistHeld = false;
+      this.pinchWasClosed = false;
+      return null;
     }
 
+    const gesture = gestureFromCount(countExtended(hand));
+    if (gesture?.action === 'bind' && gesture.element !== this.lastElement) {
+      this.lastElement = gesture.element;
+      this.onElement(gesture.element);
+    }
+    if (gesture?.action === 'wall' && !this.fistHeld && nowMs - this.lastCastAt > 500) {
+      this.lastCastAt = nowMs;
+      this.onWall();
+    }
+    this.fistHeld = gesture?.action === 'wall';
+
     // Thumb tip to index tip, normalised against the hand's own span so it
-    // works at any distance from the camera.
+    // works at any distance from the camera. A closed fist is a wall, not a pinch.
     const span = dist(hand[0], hand[9]) || 1;
     const pinch = dist(hand[4], hand[8]) / span;
-    const closed = pinch < 0.45;
+    const closed = gesture?.action !== 'wall' && pinch < 0.45;
     if (closed && !this.pinchWasClosed && nowMs - this.lastCastAt > 350) {
       this.lastCastAt = nowMs;
       this.onCast(this.lastElement);

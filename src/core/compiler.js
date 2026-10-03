@@ -5,19 +5,42 @@
 // isn't in the spellbook. `compileWithModel` in ./llm.js layers an LLM on top
 // for phrasings this misses, but routes its answer through the same validator.
 
+import { COMPOUND_NAMES, compoundFor } from './compounds.js';
 import { ELEMENTS } from './elements.js';
+import { SCALE_IDS } from './scales.js';
+import { matchHero } from './roster.js';
 import { ARCHETYPE_NAMES } from './sketch.js';
 import { FORMS, ORDERS, RECOLLECTIONS, TARGETS, SpellError, validateCall } from './spellbook.js';
 
 const VERBS = {
   bolt: ['bolt', 'shoot', 'blast', 'strike', 'hit', 'attack', 'throw', 'fling', 'zap', 'burn', 'launch'],
+  fuse: ['fuse', 'combine', 'mix', ...COMPOUND_NAMES],
   wall: ['wall', 'barrier', 'block', 'shield between', 'fence', 'barricade'],
   ward: ['ward', 'shield', 'protect', 'guard', 'armour', 'armor', 'defend'],
   mend: ['mend', 'heal', 'restore', 'repair', 'revive'],
   bind: ['bind', 'attune', 'become', 'switch to', 'change element', 'swap to'],
   shape: ['shape', 'summon', 'transform', 'morph', 'turn my companion', 'spawn'],
-  order: ['order', 'tell', 'command', 'make my companion'],
-  ascend: ['ascend', 'zoom', 'descend', 'scale', 'shrink', 'grow', 'dive', 'pull out', 'go up', 'go down'],
+  order: ['order', 'tell', 'command', 'make my companion', 'follow me', 'come with me', 'stay with me'],
+  ascend: [
+    'ascend',
+    'zoom',
+    'descend',
+    'scale',
+    'shrink',
+    'grow',
+    'dive',
+    'pull out',
+    'go up',
+    'go down',
+    'world into',
+    'take me to',
+    'shift to',
+    'bring me to',
+  ],
+  talk: ['talk', 'chat', 'whisper', 'say to'],
+  embody: ['embody', 'play the', 'select the', 'choose the', 'i pick', 'play', 'select', 'choose', 'pick'],
+  hide: ['hide', 'vanish', 'cloak', 'disappear', 'go dark'],
+  recognize: ['recognize', 'recognise', 'reveal', 'i see you', 'found them', 'the signal'],
   autopilot: ['autopilot', 'auto mode', 'auto-mode', 'auto', 'take over', 'play for me', 'afk'],
   conjure: ['conjure', 'build', 'raise', 'erect', 'place', 'put up', 'what i drew'],
   raze: [
@@ -36,10 +59,34 @@ const VERBS = {
 const ELEMENT_WORDS = {
   fire: ['fire', 'flame', 'burn', 'ember', 'plasma', 'huo', '火'],
   water: ['water', 'ice', 'frost', 'wave', 'tide', 'shui', '水'],
-  wood: ['wood', 'vine', 'forest', 'root', 'growth', 'mu', '木'],
-  metal: ['metal', 'steel', 'blade', 'sword', 'iron', 'jin', '金'],
+  wood: ['wood', 'vine', 'forest', 'root', 'growth', 'wind', 'mu', '木'],
+  metal: ['metal', 'steel', 'blade', 'sword', 'iron', 'lightning', 'thunder', 'spark', 'jin', '金'],
   earth: ['earth', 'stone', 'rock', 'dust', 'ground', 'tu', '土'],
 };
+
+// Longer aliases first so "cellulose" is not read as "cell".
+const SCALE_ALIASES = [
+  ['solar system', 'solar'],
+  ['milky way', 'galaxy'],
+  ['multiverse', 'multiverse'],
+  ['cellulose', 'cellulose'],
+  ['molecules', 'molecule'],
+  ['molecule', 'molecule'],
+  ['universe', 'multiverse'],
+  ['creature', 'creature'],
+  ['galaxy', 'galaxy'],
+  ['planet', 'planet'],
+  ['solar', 'solar'],
+  ['milky', 'galaxy'],
+  ['helix', 'dna'],
+  ['cells', 'cell'],
+  ['city', 'city'],
+  ['mars', 'planet'],
+  ['cell', 'cell'],
+  ['atom', 'atom'],
+  ['atoms', 'atom'],
+  ['dna', 'dna'],
+].filter(([, id]) => SCALE_IDS.includes(id));
 
 const TARGET_WORDS = {
   self: ['me', 'myself', 'my hero', 'self'],
@@ -126,6 +173,14 @@ function pickSpell(source) {
   // decide: a wall is a wall, but the mountain you drew is a structure.
   if (best === 'conjure' && BARRIER_RE.test(source)) return 'wall';
   if (best === 'wall' && DRAWING_RE.test(source) && !BARRIER_RE.test(source)) return 'conjure';
+  // Two named elements, or a compound's own name, is a fusion even when the
+  // sentence also contains a plain attack verb ("throw fire and lightning").
+  if (
+    (best === 'bolt' || best === 'fuse' || best === null) &&
+    (COMPOUND_NAMES.some((name) => hasWord(source, name)) || findElements(source).length >= 2)
+  ) {
+    return 'fuse';
+  }
   return best;
 }
 
@@ -146,7 +201,17 @@ function extractArgs(spellName, source) {
     case 'order':
       return { order: findOrder(source) };
     case 'ascend':
-      return { steps: findSteps(source) };
+      return { steps: findSteps(source), to: findScale(source) };
+    case 'fuse':
+      return { compound: findCompoundName(source), target: findTarget(source) };
+    case 'talk':
+      return { line: findPhrase(source) };
+    case 'embody':
+      return { hero: matchHero(source, hasWord) };
+    case 'hide':
+      return { who: findWho(source) };
+    case 'recognize':
+      return { target: findTarget(source) ?? 'gaze' };
     case 'autopilot':
       return { enabled: !/\b(off|stop|disable|back|mine)\b/.test(source) };
     case 'conjure':
@@ -159,12 +224,40 @@ function extractArgs(spellName, source) {
 }
 
 function findElement(source) {
+  return findElements(source)[0];
+}
+
+function findElements(source) {
+  const found = [];
   for (const element of ELEMENTS) {
-    for (const word of ELEMENT_WORDS[element]) {
-      if (hasWord(source, word)) return element;
-    }
+    if (ELEMENT_WORDS[element].some((word) => hasWord(source, word))) found.push(element);
   }
-  return undefined; // falls back to the caster's current attunement
+  return found;
+}
+
+function findCompoundName(source) {
+  for (const name of COMPOUND_NAMES) {
+    if (hasWord(source, name)) return name;
+  }
+  return compoundFor(findElements(source)) ?? undefined;
+}
+
+function findScale(source) {
+  for (const [alias, id] of SCALE_ALIASES) {
+    if (hasWord(source, alias)) return id;
+  }
+  return undefined;
+}
+
+function findPhrase(source) {
+  const cleaned = source
+    .replace(/\b(please|privately|private|just)\b/g, ' ')
+    .replace(/\b(talk|chat|whisper|say)\b/g, ' ')
+    .replace(/\b(to|with|my|the|a|companion|dragon|robot|alien|pet|partner)\b/g, ' ')
+    .replace(/[^a-z0-9 ']/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  return cleaned.slice(0, 80) || undefined;
 }
 
 function findTarget(source) {
@@ -181,7 +274,15 @@ function findTarget(source) {
   return best;
 }
 
+function findWho(source) {
+  if (/\b(companion|ally|pet|familiar)\b/.test(source)) return 'ally';
+  return 'self';
+}
+
 function findOrder(source) {
+  if (hasWord(source, 'stay with me') || hasWord(source, 'come with me') || hasWord(source, 'follow me')) {
+    return 'follow';
+  }
   return ORDERS.find((order) => hasWord(source, order));
 }
 

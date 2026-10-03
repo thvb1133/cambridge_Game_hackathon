@@ -28,6 +28,9 @@
         <strong>dragon</strong>
         <em id="companion-order">protect</em>
         <p id="companion-line">…</p>
+        <p class="dna" id="companion-dna">dna —</p>
+        <div class="genome" id="genome" aria-label="companion genome"></div>
+        <ol class="whisper" id="whisper"></ol>
       </div>
       <div class="memory" id="memory">
         <h2>what it remembers <button type="button" class="link" id="forget">forget me</button></h2>
@@ -50,6 +53,14 @@
       </form>
     </section>
 
+    <section class="hud model-box" id="model-box" aria-label="hero model box">
+      <header>
+        <strong>model box</strong>
+        <span>RM · Jin · Suga · J-Hope · Jimin · V · Jungkook · drop a Hyper3D .glb</span>
+      </header>
+      <div class="roster" id="roster"></div>
+    </section>
+
     <section class="hud hud--console">
       <ol class="log" id="log"></ol>
       <form class="prompt" id="prompt-form" autocomplete="off">
@@ -66,10 +77,11 @@
 
     <footer class="hud hud--bottom">
       <button class="chip" id="toggle-hands">hands: off</button>
+      <button class="chip" id="toggle-eyes">eyes: off</button>
       <button class="chip" id="toggle-voice">voice: off</button>
       <button class="chip" id="toggle-auto">autopilot: off</button>
       <button class="chip" id="toggle-pad">draw: off</button>
-      <span class="status" id="status">wasd to move · type or speak to cast · g to draw · tab for the sample spells</span>
+      <span class="status" id="status">pick a hero · h hides · r reads a signal · look to kill · g draws</span>
     </footer>
 
     <div class="toast" id="toast" hidden></div>

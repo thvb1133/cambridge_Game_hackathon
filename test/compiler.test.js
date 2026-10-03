@@ -48,9 +48,30 @@ test('a sketch nickname survives the trip through the compiler', () => {
 });
 
 test('direction words flip a scale shift', () => {
-  assert.equal(py('zoom out'), 'cast.ascend(steps=1)');
-  assert.equal(py('zoom in'), 'cast.ascend(steps=-1)');
-  assert.equal(py('zoom out 3'), 'cast.ascend(steps=3)');
+  assert.equal(py('zoom out'), 'cast.ascend(steps=1, to="next")');
+  assert.equal(py('zoom in'), 'cast.ascend(steps=-1, to="next")');
+  assert.equal(py('zoom out 3'), 'cast.ascend(steps=3, to="next")');
+});
+
+test('heroes, hiding and signals compile', () => {
+  assert.equal(py('play taehyung'), 'cast.embody(hero="taehyung")');
+  assert.equal(py('play v'), 'cast.embody(hero="taehyung")');
+  assert.equal(py('select jungkook'), 'cast.embody(hero="jungkook")');
+  assert.equal(py('choose suga'), 'cast.embody(hero="suga")');
+  assert.equal(py('select j-hope'), 'cast.embody(hero="jhope")');
+  assert.equal(py('play jin'), 'cast.embody(hero="jin")');
+  assert.equal(py('hide'), 'cast.hide(who="self")');
+  assert.equal(py('hide my companion'), 'cast.hide(who="ally")');
+  assert.equal(py('recognize the signal'), 'cast.recognize(target="gaze")');
+});
+
+test('a named rung, a fusion and a private line compile', () => {
+  assert.equal(py('turn this world into mars'), 'cast.ascend(steps=1, to="planet")');
+  assert.equal(py('zoom out to the milky way'), 'cast.ascend(steps=1, to="galaxy")');
+  assert.equal(py('combine fire and lightning'), 'cast.fuse(compound="plasma", target="nearest")');
+  assert.equal(py('fuse water and wind'), 'cast.fuse(compound="storm", target="nearest")');
+  assert.equal(py('talk to my companion stay close'), 'cast.talk(line="stay close")');
+  assert.equal(py('follow me'), 'cast.order(order="follow")');
 });
 
 test('unattuned spells defer to the caster element', () => {
@@ -100,9 +121,9 @@ test('qi exhaustion refuses a cast instead of throwing', () => {
 
 test('the scale ladder clamps at both ends', () => {
   const match = new Match();
-  match.cast('ascend', { steps: -7 });
+  match.cast('ascend', { steps: -10 });
   assert.equal(match.scale.id, 'atom');
   match.qi = 100;
-  match.cast('ascend', { steps: 7 });
+  match.cast('ascend', { steps: 10 });
   assert.equal(match.scale.id, 'multiverse');
 });

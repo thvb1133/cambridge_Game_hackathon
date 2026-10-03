@@ -67,13 +67,16 @@ html, body {
 }
 .ladder li.is-current { background: var(--accent); box-shadow: 0 0 12px var(--accent); }
 .ladder li.is-passed { background: rgba(255, 255, 255, 0.4); }
-.ladder li span {
+.ladder li span { display: none; }
+.ladder li.is-current span {
+  display: block;
   position: absolute;
   top: 8px; left: 0;
   font-size: 9px;
-  color: var(--dim);
+  color: var(--ink);
   text-transform: uppercase;
   letter-spacing: 0.1em;
+  white-space: nowrap;
 }
 
 .codex {
@@ -148,6 +151,36 @@ html, body {
 .companion strong { text-transform: uppercase; letter-spacing: 0.12em; }
 .companion em { color: var(--dim); font-style: normal; float: right; }
 .companion p { margin: 8px 0 0; color: var(--accent); min-height: 2.4em; line-height: 1.4; }
+.dna { margin: 6px 0 0; color: var(--dim); font-size: 10px; letter-spacing: 0.12em; text-transform: uppercase; }
+
+.genome { display: grid; gap: 3px; margin-top: 8px; }
+.genome div {
+  display: grid;
+  grid-template-columns: 16px 1fr;
+  align-items: center;
+  gap: 6px;
+  color: var(--dim);
+  font-size: 10px;
+}
+.genome i {
+  display: block;
+  height: 3px;
+  border-radius: 2px;
+  background: rgba(255, 255, 255, 0.08);
+  overflow: hidden;
+}
+.genome b { display: block; height: 100%; width: 100%; transform-origin: left; transform: scaleX(0.04); }
+
+.whisper {
+  list-style: none;
+  margin: 8px 0 0;
+  padding: 0;
+  max-height: 4.6em;
+  overflow: hidden;
+}
+.whisper:empty { display: none; }
+.whisper li { color: var(--dim); line-height: 1.45; }
+.whisper b { color: var(--ink); font-weight: 500; }
 
 .memory {
   padding: 10px 12px;
@@ -209,6 +242,44 @@ html, body {
 }
 .sketchbook button:hover { transform: translateY(-2px); border-color: var(--accent); color: var(--ink); }
 .sketchbook span { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* model box ------------------------------------------------------------- */
+
+.model-box {
+  top: 74px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: min(760px, calc(100vw - 460px));
+  padding: 8px 10px;
+  background: var(--panel);
+  border: 1px solid var(--edge);
+  border-radius: 10px;
+  backdrop-filter: blur(10px);
+}
+.model-box header {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 6px;
+}
+.model-box header strong { letter-spacing: 0.14em; text-transform: uppercase; font-size: 10px; }
+.model-box header span { color: var(--dim); font-size: 10px; }
+.roster { display: flex; gap: 6px; }
+.roster button {
+  flex: 1;
+  min-width: 0;
+  padding: 6px 4px 5px;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid var(--edge);
+  border-radius: 8px;
+  color: var(--dim);
+  font: inherit;
+  cursor: pointer;
+}
+.roster button.is-active { border-color: var(--accent); color: var(--ink); }
+.roster button strong { display: block; color: var(--ink); font-size: 11px; letter-spacing: 0.08em; text-transform: uppercase; }
+.roster button em { display: block; margin-top: 2px; font-style: normal; font-size: 9px; letter-spacing: 0.04em; }
+.roster button.is-drag { outline: 1px dashed var(--accent); }
 
 /* drawing pad ----------------------------------------------------------- */
 
@@ -391,4 +462,5 @@ html, body {
 @media (max-width: 900px) {
   .hud--left, .codex { display: none; }
   .hud--console { left: 12px; right: 12px; width: auto; }
+  .model-box { width: calc(100vw - 24px); top: 64px; }
 }

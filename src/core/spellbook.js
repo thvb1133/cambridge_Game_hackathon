@@ -5,10 +5,14 @@
 // fill in arguments that pass validation. The Python shown in the chat log is
 // rendered *from* the validated call, not parsed into one.
 
+import { COMPOUND_NAMES } from './compounds.js';
 import { ELEMENTS } from './elements.js';
+import { ROSTER_IDS } from './roster.js';
+import { SCALE_IDS } from './scales.js';
 
-export const TARGETS = ['nearest', 'strongest', 'weakest', 'self', 'ally', 'all'];
+export const TARGETS = ['nearest', 'strongest', 'weakest', 'self', 'ally', 'all', 'gaze'];
 export const FORMS = ['dragon', 'robot', 'alien'];
+export const WHO = ['self', 'ally'];
 export const ORDERS = ['protect', 'attack', 'follow', 'hold', 'scout'];
 export const RECOLLECTIONS = ['you', 'sketches', 'scales', 'companion'];
 
@@ -81,9 +85,46 @@ export const SPELLBOOK = {
   },
   ascend: {
     qi: 30,
-    summary: 'Shift the arena one rung up or down the scale ladder.',
+    summary: 'Shift the arena up or down the scale ladder, or to a named rung.',
     params: {
-      steps: { type: 'number', min: -7, max: 7, default: 1 },
+      steps: { type: 'number', min: -10, max: 10, default: 1 },
+      to: { type: 'enum', values: ['next', ...SCALE_IDS], default: 'next' },
+    },
+  },
+  fuse: {
+    qi: 22,
+    summary: 'Strike with two elements braided into one compound.',
+    params: {
+      compound: { type: 'enum', values: COMPOUND_NAMES, default: 'plasma' },
+      target: { type: 'enum', values: TARGETS, default: 'nearest' },
+    },
+  },
+  talk: {
+    qi: 0,
+    summary: 'Say something to your companion. It is remembered, never executed.',
+    params: {
+      line: { type: 'phrase', default: 'hello' },
+    },
+  },
+  embody: {
+    qi: 0,
+    summary: 'Step into one of the seven heroes in the model box.',
+    params: {
+      hero: { type: 'enum', values: ROSTER_IDS, default: 'rm' },
+    },
+  },
+  hide: {
+    qi: 8,
+    summary: 'Vanish and leave a signal. Unrecognized, you cannot be hit.',
+    params: {
+      who: { type: 'enum', values: WHO, default: 'self' },
+    },
+  },
+  recognize: {
+    qi: 0,
+    summary: 'Read a signal and make its owner killable.',
+    params: {
+      target: { type: 'enum', values: ['gaze', 'nearest'], default: 'gaze' },
     },
   },
   autopilot: {
@@ -163,6 +204,15 @@ function coerce(spellName, key, schema, value) {
       throw new SpellError(`${spellName}(${key}=…) must be a short plain name`);
     }
     return normalised;
+  }
+  if (schema.type === 'phrase') {
+    const normalised = String(value)
+      .toLowerCase()
+      .trim()
+      .replace(/\s+/g, ' ')
+      .replace(/[^a-z0-9 ']/g, '');
+    if (!normalised) throw new SpellError(`${spellName}(${key}=…) needs plain words`);
+    return normalised.slice(0, 80);
   }
   if (schema.type === 'boolean') {
     if (typeof value === 'boolean') return value;

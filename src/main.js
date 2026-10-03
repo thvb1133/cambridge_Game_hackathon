@@ -4,9 +4,12 @@ import { ELEMENTS, GLYPH, COLOR } from './core/elements.js';
 import { compileWithModel, modelEnabled } from './core/llm.js';
 import { MAX_QI, Match } from './core/match.js';
 import { Memory } from './core/memory.js';
+import { ROSTER } from './core/roster.js';
 import { SCALES, formatMetres } from './core/scales.js';
 import { SketchError, describeSketch, readSketch } from './core/sketch.js';
 import { renderPython } from './core/spellbook.js';
+import { screenToArena } from './input/aim.js';
+import { GazeInput } from './input/gaze.js';
 import { HandInput } from './input/hands.js';
 import { SketchPad, thumbnail } from './input/sketchpad.js';
 import { VoiceInput, speak } from './input/voice.js';
@@ -21,7 +24,6 @@ const agent = new CompanionAgent(match, { onSpeak: companionSays });
 
 const keys = new Set();
 let lastFrame = performance.now();
-let handPoint = null;
 
 // --- input ---------------------------------------------------------------
 
@@ -60,6 +62,8 @@ window.addEventListener('keydown', (event) => {
   }
   if (event.key === 'q') match.cast('ascend', { steps: -1 }, 'key');
   if (event.key === 'e') match.cast('ascend', { steps: 1 }, 'key');
+  if (event.key === 'h') match.cast('hide', { who: 'self' }, 'key');
+  if (event.key === 'r') match.cast('recognize', { target: 'nearest' }, 'key');
   keys.add(event.key.toLowerCase());
 });
 window.addEventListener('keyup', (event) => keys.delete(event.key.toLowerCase()));
@@ -74,6 +78,7 @@ $('prompt-form').addEventListener('submit', (event) => {
 
 for (const [id, handler] of [
   ['toggle-hands', toggleHands],
+  ['toggle-eyes', toggleEyes],
   ['toggle-voice', toggleVoice],
   ['toggle-auto', toggleAuto],
   ['toggle-pad', () => togglePad()],
@@ -84,9 +89,12 @@ for (const [id, handler] of [
 
 const hands = new HandInput({
   onElement: (element) => match.cast('bind', { element }, 'gesture'),
-  onCast: () => match.cast('bolt', { target: 'nearest' }, 'gesture'),
+  onCast: () => match.cast('bolt', { target: 'gaze' }, 'gesture'),
+  onWall: () => match.cast('wall', { element: 'earth', target: 'gaze' }, 'gesture'),
   onStatus: setStatus,
 });
+
+const eyes = new GazeInput({ onStatus: setStatus });
 
 const voice = new VoiceInput({
   onTranscript: (text) => runUtterance(text, 'spoken'),
@@ -105,6 +113,20 @@ async function toggleHands() {
   const ok = await hands.start();
   button.classList.toggle('is-on', ok);
   button.textContent = ok ? 'hands: on' : 'hands: off';
+}
+
+async function toggleEyes() {
+  const button = $('toggle-eyes');
+  if (eyes.enabled) {
+    eyes.stop();
+    button.classList.remove('is-on');
+    button.textContent = 'eyes: off';
+    return;
+  }
+  button.textContent = 'eyes: …';
+  const ok = await eyes.start();
+  button.classList.toggle('is-on', ok);
+  button.textContent = ok ? 'eyes: on' : 'eyes: off';
 }
 
 function toggleVoice() {
@@ -209,7 +231,13 @@ async function runUtterance(text, origin) {
 }
 
 const SAMPLES = [
+  'play taehyung',
+  'hide',
+  'recognize the signal',
   'throw fire at the nearest one',
+  'combine fire and lightning',
+  'turn this world into mars',
+  'talk to my companion stay close',
   'raise a wall of earth between me and the strongest one',
   'shield me with water',
   'turn my companion into a robot',
@@ -267,6 +295,24 @@ function handleEvent(event) {
       break;
     case 'wave':
       toast('new wave');
+      break;
+    case 'talk':
+      appendWhisper(event.line, event.reply);
+      companionSays(event.reply, { hold: 4000 });
+      break;
+    case 'embody':
+      world.rebuildUnit(match.hero);
+      toast(event.hero.title);
+      renderRoster();
+      break;
+    case 'hide':
+      toast('signal');
+      break;
+    case 'recognize':
+      toast('seen');
+      if (event.unit?.faction === 'enemy') {
+        companionSays(`${event.unit.title || event.unit.name} is open. strike.`, { hold: 2500 });
+      }
       break;
     default:
       break;
@@ -414,6 +460,41 @@ function toast(text) {
   node.style.animation = '';
 }
 
+function renderGenome() {
+  const box = $('genome');
+  const counts = memory.summary().elements ?? {};
+  if (!box.childElementCount) {
+    for (const element of ELEMENTS) {
+      const row = document.createElement('div');
+      row.dataset.element = element;
+      const glyph = document.createElement('span');
+      glyph.textContent = GLYPH[element];
+      glyph.style.color = `#${COLOR[element].toString(16).padStart(6, '0')}`;
+      const track = document.createElement('i');
+      const fill = document.createElement('b');
+      fill.style.background = glyph.style.color;
+      track.append(fill);
+      row.append(glyph, track);
+      box.append(row);
+    }
+  }
+  const total = ELEMENTS.reduce((sum, element) => sum + (counts[element] || 0), 0) || 1;
+  for (const row of box.children) {
+    const amount = counts[row.dataset.element] || 0;
+    row.querySelector('b').style.transform = `scaleX(${Math.max(0.04, amount / total)})`;
+  }
+}
+
+function appendWhisper(line, reply) {
+  const list = $('whisper');
+  const item = document.createElement('li');
+  const said = document.createElement('b');
+  said.textContent = line;
+  item.append(said, document.createTextNode(` — ${reply}`));
+  list.append(item);
+  while (list.childElementCount > 3) list.firstElementChild.remove();
+}
+
 function updateVitals() {
   const hero = match.hero;
   $('hp-fill').style.transform = `scaleX(${Math.max(0, hero.hp / hero.maxHp)})`;
@@ -423,6 +504,47 @@ function updateVitals() {
   const companion = $('companion');
   companion.querySelector('strong').textContent = match.companion.form;
   $('companion-order').textContent = match.companion.order;
+  $('companion-dna').textContent = `dna ${match.companion.dna || '—'}`;
+  renderGenome();
+}
+
+function renderRoster() {
+  const box = $('roster');
+  if (!box.childElementCount) {
+    for (const hero of ROSTER) {
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.dataset.hero = hero.id;
+      button.title = `models/${hero.id}.glb`;
+      const name = document.createElement('strong');
+      name.textContent = hero.title;
+      const blurb = document.createElement('em');
+      blurb.textContent = hero.blurb;
+      button.append(name, blurb);
+      button.addEventListener('click', () => match.cast('embody', { hero: hero.id }, 'click'));
+      button.addEventListener('dragover', (event) => {
+        event.preventDefault();
+        button.classList.add('is-drag');
+      });
+      button.addEventListener('dragleave', () => button.classList.remove('is-drag'));
+      button.addEventListener('drop', (event) => {
+        event.preventDefault();
+        button.classList.remove('is-drag');
+        const file = [...event.dataTransfer.files].find((item) => /\.glb$|\.gltf$/i.test(item.name));
+        if (!file) {
+          setStatus('drop a .glb from Hyper3D');
+          return;
+        }
+        world.useModel(hero.id, URL.createObjectURL(file));
+        match.cast('embody', { hero: hero.id }, 'drop');
+        setStatus(`${hero.title} is wearing ${file.name}`);
+      });
+      box.append(button);
+    }
+  }
+  for (const button of box.children) {
+    button.classList.toggle('is-active', button.dataset.hero === match.hero.rosterId);
+  }
 }
 
 function setStatus(text) {
@@ -450,9 +572,16 @@ function frame(now) {
   agent.tick(dt);
   match.step(dt);
 
-  const point = hands.poll(now);
-  if (point) handPoint = point;
-  world.showGaze(handPoint ? screenToArena(handPoint) : null);
+  const gazePoint = eyes.poll(now);
+  const handPoint = hands.poll(now);
+  const screen = gazePoint || handPoint;
+  if (screen) {
+    const arena = screenToArena(screen);
+    match.setAim(arena);
+    world.showGaze(arena, Boolean(gazePoint));
+  } else {
+    world.showGaze(null);
+  }
 
   world.sync(dt);
   world.render();
@@ -460,12 +589,6 @@ function frame(now) {
   renderAttunement();
 
   requestAnimationFrame(frame);
-}
-
-// Rough mapping from normalised camera space onto the arena floor. Good
-// enough for an aim reticle; a real gaze pipeline would raycast properly.
-function screenToArena({ x, y }) {
-  return { x: (x - 0.5) * 24, z: (y - 0.5) * 22 + 2 };
 }
 
 // --- boot ----------------------------------------------------------------
@@ -480,6 +603,8 @@ memory.beginSession();
 renderLadder();
 renderAttunement();
 renderMemory();
+renderRoster();
+for (const chat of memory.state.chats ?? []) appendWhisper(chat.line, chat.reply);
 appendLog({
   python: 'cast.bind(element=FIRE)',
   origin: 'boot',

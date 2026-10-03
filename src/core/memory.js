@@ -25,6 +25,7 @@ function emptyState(now) {
     scales: { visited: [], deepest: null, highest: null },
     tally: { waves: 0, defeats: 0, conjured: 0 },
     companion: { form: 'dragon', order: 'protect', affinity: 0 },
+    chats: [],
   };
 }
 
@@ -70,7 +71,12 @@ export class Memory {
       if (!parsed || parsed.version !== 1) return emptyState(now);
       // Merge rather than trust: a half-written or hand-edited blob should
       // degrade to defaults, not crash the boot.
-      return { ...emptyState(now), ...parsed, scales: { ...emptyState(now).scales, ...parsed.scales } };
+      return {
+        ...emptyState(now),
+        ...parsed,
+        scales: { ...emptyState(now).scales, ...parsed.scales },
+        chats: Array.isArray(parsed.chats) ? parsed.chats : [],
+      };
     } catch {
       return emptyState(now);
     }
@@ -132,6 +138,14 @@ export class Memory {
     if (kind in this.state.tally) this.state.tally[kind] += 1;
     if (kind === 'defeats') this.state.companion.affinity = Math.max(0, this.state.companion.affinity - 4);
     return this.state.tally;
+  }
+
+  noteChat(line, reply) {
+    this.state.chats = this.state.chats ?? [];
+    this.state.chats.push({ line, reply, at: this.now() });
+    while (this.state.chats.length > 12) this.state.chats.shift();
+    this.save();
+    return reply;
   }
 
   remember(text) {
@@ -225,6 +239,7 @@ export class Memory {
       defeats: this.state.tally.defeats,
       affinity: Math.round(this.state.companion.affinity),
       visited: this.state.scales.visited.length,
+      elements: { ...this.state.elements },
     };
   }
 }
