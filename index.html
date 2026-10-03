@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>WUXING · Scale Wars</title>
+    <link rel="stylesheet" href="/src/styles.css" />
+  </head>
+  <body>
+    <canvas id="stage"></canvas>
+
+    <header class="hud hud--top">
+      <div class="scale-readout">
+        <span class="scale-rung" id="scale-rung">Cell</span>
+        <span class="scale-sub" id="scale-sub">cytoplasm · 20 µm</span>
+      </div>
+      <ol class="ladder" id="ladder"></ol>
+      <div class="codex" id="codex"></div>
+    </header>
+
+    <aside class="hud hud--left">
+      <div class="vitals">
+        <div class="bar bar--hp"><span id="hp-fill"></span><label id="hp-label">160 / 160</label></div>
+        <div class="bar bar--qi"><span id="qi-fill"></span><label id="qi-label">100 qi</label></div>
+      </div>
+      <div class="attunement" id="attunement"></div>
+      <div class="companion" id="companion">
+        <strong>dragon</strong>
+        <em id="companion-order">protect</em>
+        <p id="companion-line">…</p>
+      </div>
+    </aside>
+
+    <section class="hud hud--console">
+      <ol class="log" id="log"></ol>
+      <form class="prompt" id="prompt-form" autocomplete="off">
+        <span class="prompt-caret">&gt;&gt;&gt;</span>
+        <input
+          id="prompt-input"
+          type="text"
+          placeholder="say it plainly — &ldquo;raise a wall of earth between me and the strongest one&rdquo;"
+          aria-label="spell console"
+        />
+        <button type="submit">cast</button>
+      </form>
+    </section>
+
+    <footer class="hud hud--bottom">
+      <button class="chip" id="toggle-hands">hands: off</button>
+      <button class="chip" id="toggle-voice">voice: off</button>
+      <button class="chip" id="toggle-auto">autopilot: off</button>
+      <span class="status" id="status">wasd to move · type or speak to cast · tab for the sample spells</span>
+    </footer>
+
+    <div class="toast" id="toast" hidden></div>
+
+    <script type="module" src="/src/main.js"></script>
+  </body>
+</html>

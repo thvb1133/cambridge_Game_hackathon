@@ -1,0 +1,166 @@
+// The whole surface area a player's words are allowed to reach.
+//
+// Nothing outside this table can ever be invoked, and no generated text is
+// ever evaluated: the compiler's only job is to pick one of these names and
+// fill in arguments that pass validation. The Python shown in the chat log is
+// rendered *from* the validated call, not parsed into one.
+
+import { ELEMENTS } from './elements.js';
+
+export const TARGETS = ['nearest', 'strongest', 'weakest', 'self', 'ally', 'all'];
+export const FORMS = ['dragon', 'robot', 'alien'];
+export const ORDERS = ['protect', 'attack', 'follow', 'hold', 'scout'];
+
+const element = (fallback = 'attuned') => ({
+  type: 'enum',
+  values: [...ELEMENTS, 'attuned'],
+  default: fallback,
+});
+
+export const SPELLBOOK = {
+  bolt: {
+    qi: 12,
+    summary: 'Hurl a focused bolt of one element.',
+    params: {
+      element: element(),
+      target: { type: 'enum', values: TARGETS, default: 'nearest' },
+    },
+  },
+  wall: {
+    qi: 20,
+    summary: 'Raise a barrier between you and a target.',
+    params: {
+      element: element(),
+      target: { type: 'enum', values: TARGETS, default: 'nearest' },
+      span: { type: 'number', min: 2, max: 14, default: 6 },
+    },
+  },
+  ward: {
+    qi: 16,
+    summary: 'Sheathe a unit in elemental qi, absorbing damage.',
+    params: {
+      element: element(),
+      target: { type: 'enum', values: TARGETS, default: 'self' },
+    },
+  },
+  mend: {
+    qi: 18,
+    summary: 'Restore health to yourself or an ally.',
+    params: {
+      target: { type: 'enum', values: TARGETS, default: 'self' },
+      amount: { type: 'number', min: 5, max: 40, default: 20 },
+    },
+  },
+  bind: {
+    qi: 4,
+    summary: 'Re-attune yourself to a different element.',
+    params: {
+      element: { type: 'enum', values: ELEMENTS, default: 'fire' },
+    },
+  },
+  shape: {
+    qi: 10,
+    summary: 'Reshape your companion into another ghost-realm form.',
+    params: {
+      form: { type: 'enum', values: FORMS, default: 'dragon' },
+      element: element(),
+    },
+  },
+  order: {
+    qi: 0,
+    summary: 'Give your companion a standing order.',
+    params: {
+      order: { type: 'enum', values: ORDERS, default: 'protect' },
+    },
+  },
+  ascend: {
+    qi: 30,
+    summary: 'Shift the arena one rung up or down the scale ladder.',
+    params: {
+      steps: { type: 'number', min: -7, max: 7, default: 1 },
+    },
+  },
+  autopilot: {
+    qi: 0,
+    summary: 'Hand your hero to the agent, or take it back.',
+    params: {
+      enabled: { type: 'boolean', default: true },
+    },
+  },
+};
+
+export const SPELL_NAMES = Object.keys(SPELLBOOK);
+
+export class SpellError extends Error {}
+
+// Coerces and bounds-checks one call against the table above. Throws rather
+// than clamping silently on anything the player could not have meant.
+export function validateCall(name, rawArgs = {}) {
+  const spell = SPELLBOOK[name];
+  if (!spell) throw new SpellError(`no such spell: ${name}`);
+
+  const args = {};
+  for (const [key, schema] of Object.entries(spell.params)) {
+    const supplied = rawArgs[key];
+    if (supplied === undefined || supplied === null || supplied === '') {
+      args[key] = schema.default;
+      continue;
+    }
+    args[key] = coerce(name, key, schema, supplied);
+  }
+
+  const unknown = Object.keys(rawArgs).filter((k) => !(k in spell.params));
+  if (unknown.length) {
+    throw new SpellError(`${name}() got unexpected argument "${unknown[0]}"`);
+  }
+  return { name, args, qi: spell.qi };
+}
+
+function coerce(spellName, key, schema, value) {
+  if (schema.type === 'enum') {
+    const normalised = String(value).toLowerCase().trim();
+    if (!schema.values.includes(normalised)) {
+      throw new SpellError(
+        `${spellName}(${key}=…) must be one of ${schema.values.join(', ')}`,
+      );
+    }
+    return normalised;
+  }
+  if (schema.type === 'number') {
+    const n = Number(value);
+    if (!Number.isFinite(n)) throw new SpellError(`${spellName}(${key}=…) must be a number`);
+    return Math.min(schema.max, Math.max(schema.min, n));
+  }
+  if (schema.type === 'boolean') {
+    if (typeof value === 'boolean') return value;
+    const normalised = String(value).toLowerCase().trim();
+    if (['true', 'on', 'yes', '1'].includes(normalised)) return true;
+    if (['false', 'off', 'no', '0'].includes(normalised)) return false;
+    throw new SpellError(`${spellName}(${key}=…) must be true or false`);
+  }
+  throw new SpellError(`unsupported parameter type ${schema.type}`);
+}
+
+// Renders the validated call as the Python line the party sees in chat.
+export function renderPython({ name, args }) {
+  const spell = SPELLBOOK[name];
+  const parts = Object.keys(spell.params)
+    .filter((key) => key in args)
+    .map((key) => `${key}=${literal(args[key], spell.params[key])}`);
+  return `cast.${name}(${parts.join(', ')})`;
+}
+
+function literal(value, schema) {
+  if (typeof value === 'boolean') return value ? 'True' : 'False';
+  if (typeof value === 'number') return String(value);
+  // Elements print as bare constants (FIRE) so spells read like incantations;
+  // everything else stays a quoted string.
+  if (schema?.values && schema.values.includes(value) && isElementish(value)) {
+    return value.toUpperCase();
+  }
+  return `"${value}"`;
+}
+
+function isElementish(value) {
+  return [...ELEMENTS, 'attuned'].includes(value);
+}
