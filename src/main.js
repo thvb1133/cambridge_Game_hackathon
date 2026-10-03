@@ -3,15 +3,19 @@ import { compile } from './core/compiler.js';
 import { ELEMENTS, GLYPH, COLOR } from './core/elements.js';
 import { compileWithModel, modelEnabled } from './core/llm.js';
 import { MAX_QI, Match } from './core/match.js';
+import { Memory } from './core/memory.js';
 import { SCALES, formatMetres } from './core/scales.js';
+import { SketchError, describeSketch, readSketch } from './core/sketch.js';
 import { renderPython } from './core/spellbook.js';
 import { HandInput } from './input/hands.js';
+import { SketchPad, thumbnail } from './input/sketchpad.js';
 import { VoiceInput, speak } from './input/voice.js';
 import { World } from './render/world.js';
 
 const $ = (id) => document.getElementById(id);
 
-const match = new Match({ onEvent: handleEvent });
+const memory = new Memory();
+const match = new Match({ onEvent: handleEvent, memory });
 const world = new World($('stage'), match);
 const agent = new CompanionAgent(match, { onSpeak: companionSays });
 
@@ -29,6 +33,15 @@ window.addEventListener('keydown', (event) => {
   if (event.key === 'Tab') {
     event.preventDefault();
     cycleSample();
+    return;
+  }
+  if (event.key === 'g') {
+    event.preventDefault();
+    togglePad();
+    return;
+  }
+  if (event.key === 'Escape' && padOpen) {
+    togglePad(false);
     return;
   }
   if (event.key === '/' || event.key === 'Enter') {
@@ -63,6 +76,8 @@ for (const [id, handler] of [
   ['toggle-hands', toggleHands],
   ['toggle-voice', toggleVoice],
   ['toggle-auto', toggleAuto],
+  ['toggle-pad', () => togglePad()],
+  ['forget', forgetMe],
 ]) {
   $(id).addEventListener('click', handler);
 }
@@ -101,6 +116,67 @@ function toggleVoice() {
 
 function toggleAuto() {
   match.cast('autopilot', { enabled: !match.autopilot }, 'key');
+}
+
+// --- the drawing path ----------------------------------------------------
+
+const pad = new SketchPad($('pad-canvas'));
+let padOpen = false;
+
+function togglePad(force) {
+  padOpen = force ?? !padOpen;
+  $('pad').hidden = !padOpen;
+  const button = $('toggle-pad');
+  button.classList.toggle('is-on', padOpen);
+  button.textContent = `draw: ${padOpen ? 'on' : 'off'}`;
+  if (!padOpen) return;
+  // The canvas has no size until the panel is shown, so the backing store can
+  // only be matched to it here.
+  pad.fit();
+  $('pad-name').focus();
+}
+
+$('pad-undo').addEventListener('click', () => pad.undo());
+$('pad-clear').addEventListener('click', () => pad.clear());
+
+$('pad-form').addEventListener('submit', (event) => {
+  event.preventDefault();
+  const nameField = $('pad-name');
+  const name = nameField.value.trim().toLowerCase();
+
+  let spec;
+  try {
+    spec = readSketch(pad.strokes, { name: name || null });
+  } catch (error) {
+    if (!(error instanceof SketchError)) throw error;
+    appendLog({ said: 'build it', origin: 'drawn', error: error.message });
+    setStatus(error.message);
+    return;
+  }
+
+  // Stored before it is raised, so the drawing survives even if the conjuring
+  // itself is refused for want of qi.
+  memory.rememberSketch(spec);
+  renderMemory();
+  nameField.value = '';
+  pad.clear();
+  togglePad(false);
+
+  const outcome = match.cast('conjure', { sketch: spec.id }, 'drawn');
+  appendLog({
+    said: name ? `build "${name}"` : 'build it',
+    origin: 'drawn',
+    python: outcome.python,
+    result: outcome.ok ? outcome.effect : null,
+    error: outcome.ok ? null : outcome.reason,
+  });
+  if (outcome.ok) companionSays(`that is a ${describeSketch(spec)}. i will remember it.`);
+});
+
+function forgetMe() {
+  memory.forget();
+  renderMemory();
+  companionSays('forgotten. we start over next time.');
 }
 
 // --- the language path ---------------------------------------------------
@@ -176,6 +252,13 @@ function handleEvent(event) {
       button.textContent = `autopilot: ${event.enabled ? 'on' : 'off'}`;
       break;
     }
+    case 'conjure':
+      toast(event.structure.spec.label);
+      renderMemory();
+      break;
+    case 'structures-fell':
+      companionSays(`your ${describeSketch(event.structures[0].spec)} came down`);
+      break;
     case 'defeat':
       toast('down');
       setTimeout(() => match.reset(), 1200);
@@ -235,6 +318,35 @@ function renderAttunement() {
   }
   for (const button of container.children) {
     button.classList.toggle('is-active', button.dataset.element === match.hero.element);
+  }
+}
+
+// The sketchbook is the visible proof that the game kept something: every
+// entry is the player's own silhouette, redrawn from the stored band profile
+// rather than a saved bitmap, and clicking one raises it again.
+function renderMemory() {
+  const summary = memory.summary();
+  const bits = [`session ${summary.sessions}`];
+  if (summary.favouriteElement) bits.push(summary.favouriteElement);
+  if (summary.conjured) bits.push(`${summary.conjured} raised`);
+  if (summary.visited) bits.push(`${summary.visited}/${SCALES.length} rungs`);
+  if (summary.defeats) bits.push(`${summary.defeats} down`);
+  $('memory-line').textContent = bits.join(' · ');
+
+  const book = $('sketchbook');
+  book.innerHTML = '';
+  for (const spec of memory.sketches.slice().reverse()) {
+    const li = document.createElement('li');
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.title = `raise the ${spec.label}`;
+    button.append(thumbnail(spec, 40, `#${COLOR[spec.element].toString(16).padStart(6, '0')}`));
+    const label = document.createElement('span');
+    label.textContent = spec.name;
+    button.append(label);
+    button.addEventListener('click', () => match.cast('conjure', { sketch: spec.id }, 'sketchbook'));
+    li.append(button);
+    book.append(li);
   }
 }
 
@@ -346,11 +458,22 @@ function screenToArena({ x, y }) {
   return { x: (x - 0.5) * 24, z: (y - 0.5) * 22 + 2 };
 }
 
+// --- boot ----------------------------------------------------------------
+
+// The counters tick up all session; flushing them only on the way out keeps
+// the hot loop free of JSON, and `pagehide` fires where `unload` does not.
+for (const event of ['pagehide', 'visibilitychange']) {
+  window.addEventListener(event, () => memory.save());
+}
+
+memory.beginSession();
 renderLadder();
 renderAttunement();
+renderMemory();
 appendLog({
   python: 'cast.bind(element=FIRE)',
   origin: 'boot',
   result: `attuned · ${modelEnabled ? 'model compiler armed' : 'offline compiler'}`,
 });
+companionSays(memory.greeting());
 requestAnimationFrame(frame);

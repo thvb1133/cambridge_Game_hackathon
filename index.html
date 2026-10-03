@@ -29,7 +29,26 @@
         <em id="companion-order">protect</em>
         <p id="companion-line">…</p>
       </div>
+      <div class="memory" id="memory">
+        <h2>what it remembers <button type="button" class="link" id="forget">forget me</button></h2>
+        <p class="memory-line" id="memory-line">first session</p>
+        <ul class="sketchbook" id="sketchbook"></ul>
+      </div>
     </aside>
+
+    <section class="hud pad" id="pad" hidden>
+      <header>
+        <strong>draw it</strong>
+        <span>any shape · the silhouette is what gets built</span>
+      </header>
+      <canvas id="pad-canvas"></canvas>
+      <form class="pad-actions" id="pad-form" autocomplete="off">
+        <input id="pad-name" type="text" maxlength="24" placeholder="name it (optional)" aria-label="sketch name" />
+        <button type="button" class="ghost" id="pad-undo">undo</button>
+        <button type="button" class="ghost" id="pad-clear">clear</button>
+        <button type="submit">build it</button>
+      </form>
+    </section>
 
     <section class="hud hud--console">
       <ol class="log" id="log"></ol>
@@ -49,7 +68,8 @@
       <button class="chip" id="toggle-hands">hands: off</button>
       <button class="chip" id="toggle-voice">voice: off</button>
       <button class="chip" id="toggle-auto">autopilot: off</button>
-      <span class="status" id="status">wasd to move · type or speak to cast · tab for the sample spells</span>
+      <button class="chip" id="toggle-pad">draw: off</button>
+      <span class="status" id="status">wasd to move · type or speak to cast · g to draw · tab for the sample spells</span>
     </footer>
 
     <div class="toast" id="toast" hidden></div>

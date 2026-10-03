@@ -31,6 +31,7 @@ export class World {
     this.unitMeshes = new Map();
     this.projectileMeshes = new Map();
     this.wallMeshes = new Map();
+    this.structureMeshes = new Map();
     this.gazeRing = this.buildGazeRing();
 
     this.applyScale(match.scale, { instant: true });
@@ -208,6 +209,23 @@ export class World {
       mesh.material.opacity = Math.min(0.75, w.ttl / 3);
     });
 
+    this.syncPool(this.structureMeshes, match.structures, (s) => {
+      const group = buildStructure(s);
+      this.scene.add(group);
+      return group;
+    }, (group, s) => {
+      group.position.set(s.position.x, 0, s.position.z);
+      // Drawings push up out of the floor instead of popping in, which is
+      // what makes "I drew that and it is now in the game" land on a stage.
+      group.userData.rise = Math.min(1, (group.userData.rise ?? 0) + dt * 2.2);
+      const rise = easeOut(group.userData.rise);
+      group.scale.set(1, rise, 1);
+      const wear = s.hp / s.maxHp;
+      for (const slab of group.children) {
+        slab.material.emissiveIntensity = 0.12 + (1 - wear) * 0.5;
+      }
+    });
+
     this.cameraHeight += (this.cameraTargetHeight - this.cameraHeight) * Math.min(1, dt * 2.4);
     const hero = match.hero.position;
     this.camera.position.set(hero.x * 0.3, this.cameraHeight, this.cameraHeight * 0.78 + 4);
@@ -233,8 +251,7 @@ export class World {
     for (const [item, mesh] of store) {
       if (seen.has(item)) continue;
       this.scene.remove(mesh);
-      mesh.geometry.dispose();
-      mesh.material.dispose();
+      dispose(mesh);
       store.delete(item);
     }
   }
@@ -251,6 +268,60 @@ export class World {
   render() {
     this.renderer.render(this.scene, this.camera);
   }
+}
+
+// A sketch becomes a solid by revolving its band profile around the vertical
+// axis: each band is one slab, sized by how wide the player's ink was at that
+// height. Round archetypes get cylinders, built ones get boxes, which is the
+// whole difference between a drawn dome and a drawn keep.
+function buildStructure(structure) {
+  const { spec } = structure;
+  const scale = structure.span * 2;
+  const colour = COLOR[spec.element];
+  const group = new THREE.Group();
+  group.userData.rise = 0;
+
+  spec.bands.forEach((band, index) => {
+    const width = Math.max(0.12, band.halfWidth * 2 * scale);
+    const height = Math.max(0.08, (band.y1 - band.y0) * scale);
+    const geometry = spec.round
+      ? new THREE.CylinderGeometry(width / 2, width / 2, height, 14)
+      : new THREE.BoxGeometry(width, height, width);
+
+    const slab = new THREE.Mesh(
+      geometry,
+      new THREE.MeshStandardMaterial({
+        color: colour,
+        roughness: 0.75,
+        metalness: 0.15,
+        emissive: colour,
+        emissiveIntensity: 0.12,
+        // Alternate the shading band to band so the stack reads as courses of
+        // stone rather than one smooth lump.
+        flatShading: index % 2 === 0,
+      }),
+    );
+    slab.position.set(
+      (band.offset - 0.5) * scale * 0.4,
+      (band.y0 + band.y1) / 2 * scale,
+      0,
+    );
+    slab.rotation.y = spec.round ? 0 : index * 0.04;
+    group.add(slab);
+  });
+
+  return group;
+}
+
+// Structures are groups of slabs, everything else is a bare mesh, so walk.
+function dispose(object) {
+  object.geometry?.dispose();
+  object.material?.dispose();
+  for (const child of object.children) dispose(child);
+}
+
+function easeOut(t) {
+  return 1 - (1 - t) ** 3;
 }
 
 function companionGeometry(form) {
