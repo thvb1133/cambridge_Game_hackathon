@@ -1,0 +1,20 @@
+{
+  "name": "wuxing-scale-wars",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Multimodal AI arena where spells are written in plain language, compiled to a sandboxed Python-like DSL, and fought across eleven orders of magnitude.",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview --host",
+    "test": "node --test test/*.test.js"
+  },
+  "dependencies": {
+    "@mediapipe/tasks-vision": "^0.10.14",
+    "three": "^0.169.0"
+  },
+  "devDependencies": {
+    "vite": "^5.4.8"
+  }
+}
